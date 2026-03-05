@@ -1,0 +1,894 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+
+const TILE = 40;
+const COLS = 20;
+const ROWS = 15;
+
+const T = {
+  GRASS: 0, PATH: 1, BUILDING: 2, DOOR: 3, WATER: 4,
+  TREE: 5, SIGN: 6, FLOWER: 7, TALL_GRASS: 8, FENCE: 9,
+  POKECENTER: 10, MART: 11, SAND: 12,
+};
+
+const MAP = [
+  [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],
+  [5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5],
+  [5,0,10,10,10,10,0,0,11,11,11,0,0,2,2,2,0,0,0,5],
+  [5,0,10,10,10,10,0,0,11,11,11,0,0,2,2,2,0,7,0,5],
+  [5,0,10,3,10,10,0,0,11,3,11,0,0,2,3,2,0,0,0,5],
+  [5,0,0,1,0,0,0,0,0,1,0,0,0,0,1,0,0,7,0,5],
+  [5,8,8,1,0,7,0,0,0,1,0,7,0,0,1,0,9,9,9,5],
+  [5,8,8,1,1,1,1,1,1,1,1,1,1,1,1,0,9,4,9,5],
+  [5,8,8,0,0,0,0,8,8,0,0,0,0,0,1,0,9,4,9,5],
+  [5,0,0,0,7,0,0,8,8,0,7,0,0,0,1,0,0,0,0,5],
+  [5,0,6,0,0,0,0,0,0,0,0,0,0,0,1,0,0,7,0,5],
+  [5,0,0,0,0,7,0,0,0,0,0,7,0,0,1,0,0,0,0,5],
+  [5,0,0,12,12,12,12,12,0,0,0,0,0,0,1,1,1,1,1,5],
+  [5,0,0,12,4,4,4,12,0,0,0,0,0,0,0,0,0,0,0,5],
+  [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],
+];
+
+const NPCs = [
+  { id:1, x:6,  y:9,  name:"Youngster Joey", color:"#4488ff", hatColor:"#2255cc", skinColor:"#f5c9a0", dialog:["Hey! Wanna battle?","My Rattata is in the top percentage!","...of all Rattatas!"] },
+  { id:2, x:11, y:3,  name:"Lass Lily",      color:"#ff88cc", hatColor:"#cc4499", skinColor:"#f5c9a0", dialog:["La la la~","I love Pokemon!","Especially cute ones like Eevee!"] },
+  { id:3, x:15, y:9,  name:"Elder Oak",      color:"#888866", hatColor:"#555544", skinColor:"#d4a070", dialog:["Welcome to Pallete Town!","This town smells of...","...a newfound adventure!"] },
+  { id:4, x:4,  y:11, name:"Nurse Joy",      color:"#ffaaaa", hatColor:"#ff6666", skinColor:"#f5c9a0", dialog:["Your Pokemon look healthy!","Come to the Pokemon Center anytime~"] },
+];
+
+const SIGNS = [
+  { x:2, y:10, text:["PALLETE TOWN","A pure white beginning"] },
+  { x:14, y:12, text:["ROUTE 1 ->","Viridian City: 3.2km"] },
+];
+
+const WILD_POKEMON = [
+  { name:"Pidgey",   color:"#c8a060", emoji:"🐦" },
+  { name:"Rattata",  color:"#9966bb", emoji:"🐭" },
+  { name:"Caterpie", color:"#66aa44", emoji:"🐛" },
+  { name:"Weedle",   color:"#cc8844", emoji:"🐝" },
+];
+
+function shadeColor(hex, pct) {
+  const clean = hex.replace('#','');
+  const n = parseInt(clean, 16);
+  const r = Math.min(255, Math.max(0, (n >> 16) + pct));
+  const g = Math.min(255, Math.max(0, ((n >> 8) & 0xff) + pct));
+  const b = Math.min(255, Math.max(0, (n & 0xff) + pct));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ── Tile renderers ─────────────────────────────────────────────────────────────
+
+function GrassTile() {
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#5ea832" />
+      <rect x={0} y={TILE-4} width={TILE} height={4} fill="#3d7820" opacity={0.5} />
+      <rect x={0} y={0} width={TILE} height={2} fill="rgba(255,255,255,0.07)" />
+      {[4,12,20,28,36].map(x => (
+        <line key={x} x1={x} y1={TILE} x2={x-1} y2={TILE-5} stroke="#4a9028" strokeWidth={1} opacity={0.4} />
+      ))}
+    </g>
+  );
+}
+
+function PathTile() {
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#c8a870" />
+      <rect x={0} y={TILE-3} width={TILE} height={3} fill="#a08050" opacity={0.6} />
+      <rect x={0} y={0} width={TILE} height={1} fill="rgba(255,255,255,0.18)" />
+      {[6,16,26,36].map(x => (
+        <circle key={x} cx={x} cy={x % 12 === 6 ? 14 : 26} r={1.2} fill="rgba(0,0,0,0.1)" />
+      ))}
+    </g>
+  );
+}
+
+function WaterTile({ tick }) {
+  const wave = (Math.sin((tick / 12) * Math.PI)) * 2.5;
+  const wave2 = (Math.cos((tick / 18) * Math.PI)) * 2;
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#2a85c8" />
+      <rect width={TILE} height={TILE} fill="#3090d8" opacity={0.5} />
+      {/* shimmer */}
+      <rect x={8} y={6 + wave} width={10} height={2} fill="rgba(200,240,255,0.35)" rx={1} />
+      <rect x={24} y={18 + wave2} width={8} height={2} fill="rgba(200,240,255,0.25)" rx={1} />
+      {[0.28, 0.58, 0.82].map((yf, i) => (
+        <path
+          key={i}
+          d={`M2,${yf*TILE + wave*(i%2===0?1:-1)} Q${TILE/2},${yf*TILE + wave2*(i%2===0?-1:1)} ${TILE-2},${yf*TILE + wave*(i%2===0?1:-1)}`}
+          stroke={`rgba(140,220,255,${0.45 - i*0.1})`}
+          strokeWidth={1.5}
+          fill="none"
+        />
+      ))}
+      <rect x={0} y={0} width={TILE} height={3} fill="rgba(120,200,255,0.2)" />
+    </g>
+  );
+}
+
+function Tree3D({ tick }) {
+  const sway = Math.sin((tick / 24) * Math.PI) * 1.8;
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#6ab83e" />
+      {/* trunk */}
+      <rect x={17} y={27} width={7} height={11} fill="#7a4f2a" />
+      <rect x={17} y={27} width={3} height={11} fill="#5a3a1a" />
+      {/* ground shadow */}
+      <ellipse cx={20} cy={37} rx={11} ry={3} fill="rgba(0,0,0,0.22)" />
+      {/* canopy - 3 stacked layers for depth */}
+      <ellipse cx={20+sway*0.4} cy={26} rx={15} ry={8} fill="#236a18" />
+      <ellipse cx={20+sway*0.6} cy={21} rx={13} ry={9} fill="#2e8a24" />
+      <ellipse cx={20+sway*0.9} cy={15} rx={11} ry={8} fill="#3aaa30" />
+      <ellipse cx={20+sway*1.1} cy={9} rx={8} ry={7} fill="#48cc44" />
+      {/* highlight spot */}
+      <ellipse cx={23+sway} cy={7} rx={4} ry={3} fill="rgba(180,255,180,0.28)" />
+    </g>
+  );
+}
+
+function TallGrass3D({ tick, mx, my }) {
+  const phase = ((tick + mx * 7 + my * 13) % 80) / 80;
+  const sway = Math.sin(phase * Math.PI * 2) * 2.5;
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#3a8e28" />
+      <rect x={0} y={TILE-4} width={TILE} height={4} fill="#2a6e18" opacity={0.5} />
+      {[4,11,18,25,32].map((x, i) => {
+        const s = sway * (i % 2 === 0 ? 1 : -1);
+        return (
+          <g key={i}>
+            <line x1={x} y1={TILE} x2={x+s-3} y2={TILE*0.3} stroke="#2a6e18" strokeWidth={2.5} strokeLinecap="round" />
+            <line x1={x+3} y1={TILE} x2={x+s+5} y2={TILE*0.28} stroke="#4aae38" strokeWidth={2} strokeLinecap="round" />
+            <ellipse cx={x+s+1} cy={TILE*0.26} rx={3} ry={2} fill="#5abe48" />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function FlowerTile({ tick, mx, my }) {
+  const phase = ((tick + mx * 11 + my * 7) % 120) / 120;
+  const bob = Math.sin(phase * Math.PI * 2) * 1.2;
+  const flowers = [{x:7,y:8},{x:24,y:17},{x:15,y:27},{x:32,y:9},{x:5,y:29}];
+  return (
+    <g>
+      <GrassTile />
+      {flowers.map((f, i) => (
+        <g key={i} transform={`translate(${f.x}, ${f.y + bob * (i%2===0?1:-1)})`}>
+          {[0,72,144,216,288].map(a => (
+            <ellipse
+              key={a}
+              cx={Math.cos(a*Math.PI/180)*3.5}
+              cy={Math.sin(a*Math.PI/180)*3.5}
+              rx={2.2} ry={2.2}
+              fill={i%3===0?"#ff88aa":i%3===1?"#ffdd44":"#aa88ff"}
+            />
+          ))}
+          <circle r={2} fill="#ffee55" />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function Building3D() {
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#c8a080" />
+      <rect x={0} y={0} width={4} height={TILE} fill="rgba(0,0,0,0.14)" />
+      <rect x={TILE-3} y={0} width={3} height={TILE} fill="rgba(255,255,255,0.09)" />
+      <rect x={5} y={7} width={11} height={11} fill="#add8e6" rx={1} opacity={0.85} />
+      <rect x={6} y={8} width={5} height={5} fill="rgba(255,255,255,0.45)" />
+      <rect x={24} y={7} width={11} height={11} fill="#add8e6" rx={1} opacity={0.85} />
+      <rect x={25} y={8} width={5} height={5} fill="rgba(255,255,255,0.45)" />
+      <rect x={0} y={0} width={TILE} height={3} fill="rgba(200,160,120,0.5)" />
+      <rect x={0} y={TILE-4} width={TILE} height={4} fill="rgba(0,0,0,0.18)" />
+    </g>
+  );
+}
+
+function Pokecenter3D() {
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#d84040" />
+      <rect x={0} y={0} width={4} height={TILE} fill="rgba(0,0,0,0.16)" />
+      <rect x={TILE-3} y={0} width={3} height={TILE} fill="rgba(255,255,255,0.1)" />
+      <polygon points={`0,20 ${TILE},20 ${TILE/2},5`} fill="#e86060" />
+      <polygon points={`0,20 4,20 ${TILE/2},6 ${TILE/2},5`} fill="#b82828" />
+      <rect x={12} y={22} width={16} height={14} fill="#f0a0a0" rx={1} />
+      <rect x={13} y={23} width={7} height={6} fill="rgba(255,255,255,0.45)" />
+      {/* cross */}
+      <rect x={17} y={11} width={6} height={2} fill="white" opacity={0.9} />
+      <rect x={19} y={9} width={2} height={6} fill="white" opacity={0.9} />
+      <rect x={0} y={TILE-4} width={TILE} height={4} fill="rgba(0,0,0,0.18)" />
+    </g>
+  );
+}
+
+function Mart3D() {
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#4070d8" />
+      <rect x={0} y={0} width={4} height={TILE} fill="rgba(0,0,0,0.16)" />
+      <rect x={TILE-3} y={0} width={3} height={TILE} fill="rgba(255,255,255,0.1)" />
+      <polygon points={`0,20 ${TILE},20 ${TILE/2},5`} fill="#5580e8" />
+      <polygon points={`0,20 4,20 ${TILE/2},6 ${TILE/2},5`} fill="#2050a0" />
+      <rect x={10} y={22} width={20} height={14} fill="#90b0f8" rx={1} />
+      <rect x={11} y={23} width={9} height={6} fill="rgba(255,255,255,0.45)" />
+      <rect x={12} y={13} width={16} height={3} fill="white" opacity={0.45} rx={1} />
+      <rect x={0} y={TILE-4} width={TILE} height={4} fill="rgba(0,0,0,0.18)" />
+    </g>
+  );
+}
+
+function DoorTile() {
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#5c3d2e" />
+      <rect x={4} y={2} width={TILE-8} height={TILE-4} fill="#7a5230" rx={2} />
+      <rect x={4} y={2} width={6} height={TILE-4} fill="#5a3a1a" rx={1} />
+      <circle cx={28} cy={22} r={2.5} fill="#f7c948" />
+      <circle cx={28} cy={22} r={1} fill="#c89000" />
+      <rect x={0} y={TILE-3} width={TILE} height={3} fill="rgba(0,0,0,0.3)" />
+    </g>
+  );
+}
+
+function SignTile() {
+  return (
+    <g>
+      <GrassTile />
+      <rect x={12} y={6} width={18} height={14} fill="#c8a050" rx={1} stroke="#7a5a20" strokeWidth={1} />
+      <rect x={12} y={6} width={5} height={14} fill="#a88040" rx={1} />
+      <rect x={17} y={3} width={2} height={3} fill="rgba(255,255,255,0.3)" />
+      <rect x={18} y={20} width={5} height={14} fill="#7a5a20" />
+    </g>
+  );
+}
+
+function FenceTile() {
+  return (
+    <g>
+      <GrassTile />
+      <rect x={0} y={14} width={TILE} height={5} fill="#c8a870" />
+      <rect x={0} y={14} width={TILE} height={2} fill="#e8c898" />
+      <rect x={0} y={18} width={TILE} height={1} fill="rgba(0,0,0,0.2)" />
+      {[3,29].map(x => (
+        <g key={x}>
+          <rect x={x} y={8} width={6} height={22} fill="#c8a870" rx={1} />
+          <rect x={x} y={8} width={2} height={22} fill="#e8c898" rx={1} />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function SandTile() {
+  return (
+    <g>
+      <rect width={TILE} height={TILE} fill="#e0c878" />
+      <rect x={0} y={TILE-3} width={TILE} height={3} fill="#c0a850" opacity={0.5} />
+      {[{x:8,y:10,r:3},{x:22,y:22,r:2.2},{x:30,y:8,r:1.8},{x:14,y:30,r:2.5},{x:34,y:28,r:1.5}].map((c,i)=>(
+        <circle key={i} cx={c.x} cy={c.y} r={c.r} fill="#c8b060" opacity={0.35} />
+      ))}
+    </g>
+  );
+}
+
+// ── 3-D Player sprite with walk cycle ─────────────────────────────────────────
+function Player3D({ facing, walkFrame }) {
+  const frame = walkFrame % 4;
+  const legOffsets = [[0,0],[4,-4],[0,0],[-4,4]];
+  const [ll, rl] = legOffsets[frame];
+  const bobY = (frame === 1 || frame === 3) ? -1.5 : 0;
+  const armL = (frame === 1) ? 3 : (frame === 3) ? -3 : 0;
+  const armR = (frame === 3) ? 3 : (frame === 1) ? -3 : 0;
+  const showFace = facing !== "up";
+  const eyeX = facing === "left" ? [10,15] : facing === "right" ? [19,24] : [12,21];
+
+  return (
+    <g transform={`translate(1, ${bobY})`}>
+      {/* shadow */}
+      <ellipse cx={19} cy={37} rx={9} ry={3} fill="rgba(0,0,0,0.28)" />
+
+      {/* Left leg */}
+      <g transform={`translate(11, ${ll})`}>
+        <rect x={0} y={24} width={7} height={10} fill="#3050b0" rx={2} />
+        <rect x={0} y={24} width={2.5} height={10} fill="#1a3080" rx={1} />
+        <rect x={0} y={32} width={7} height={3} fill="#111" rx={1} />
+      </g>
+      {/* Right leg */}
+      <g transform={`translate(20, ${rl})`}>
+        <rect x={0} y={24} width={7} height={10} fill="#3050b0" rx={2} />
+        <rect x={4.5} y={24} width={2.5} height={10} fill="#1a3080" rx={1} />
+        <rect x={0} y={32} width={7} height={3} fill="#111" rx={1} />
+      </g>
+
+      {/* Body */}
+      <rect x={9} y={14} width={20} height={13} fill="#d03030" rx={3} />
+      <rect x={9} y={14} width={5} height={13} fill="#902020" rx={2} />
+      <rect x={14} y={15} width={13} height={2} fill="rgba(255,255,255,0.22)" rx={1} />
+
+      {/* Left arm */}
+      <g transform={`translate(0, ${armL})`}>
+        <rect x={5} y={14} width={5} height={11} fill="#902020" rx={2} />
+        <rect x={5} y={23} width={5} height={4} fill="#f5c9a0" rx={1} />
+      </g>
+      {/* Right arm */}
+      <g transform={`translate(0, ${armR})`}>
+        <rect x={28} y={14} width={5} height={11} fill="#902020" rx={2} />
+        <rect x={28} y={23} width={5} height={4} fill="#f5c9a0" rx={1} />
+      </g>
+
+      {/* Neck */}
+      <rect x={16} y={11} width={6} height={4} fill="#f5c9a0" />
+
+      {/* Head */}
+      <rect x={10} y={3} width={18} height={13} fill="#f5c9a0" rx={3} />
+      <rect x={10} y={3} width={4} height={13} fill="#d4a070" rx={2} opacity={0.5} />
+
+      {/* Hat brim */}
+      <rect x={8}  y={5} width={22} height={3} fill="#902020" rx={1} />
+      {/* Hat crown */}
+      <rect x={11} y={0} width={16} height={7} fill="#d03030" rx={2} />
+      <rect x={11} y={0} width={4}  height={7} fill="#902020" rx={1} />
+      {/* Hat highlight */}
+      <rect x={13} y={1} width={9} height={1.5} fill="rgba(255,255,255,0.3)" rx={1} />
+
+      {/* Face */}
+      {showFace && (
+        <>
+          <circle cx={eyeX[0]} cy={9} r={2} fill="#1a1a1a" />
+          <circle cx={eyeX[1]} cy={9} r={2} fill="#1a1a1a" />
+          <circle cx={eyeX[0]+0.6} cy={8.4} r={0.7} fill="white" />
+          <circle cx={eyeX[1]+0.6} cy={8.4} r={0.7} fill="white" />
+        </>
+      )}
+    </g>
+  );
+}
+
+// ── 3-D NPC sprite ─────────────────────────────────────────────────────────────
+function NPC3D({ color, hatColor, skinColor }) {
+  const shade = shadeColor(color, -40);
+  return (
+    <g transform="translate(1,0)">
+      <ellipse cx={19} cy={37} rx={8} ry={2.5} fill="rgba(0,0,0,0.2)" />
+      {/* legs */}
+      <rect x={11} y={24} width={7} height={10} fill={shade} rx={2} />
+      <rect x={20} y={24} width={7} height={10} fill={shade} rx={2} />
+      {/* body */}
+      <rect x={9} y={14} width={20} height={13} fill={color} rx={3} />
+      <rect x={9} y={14} width={5} height={13} fill={shade} rx={2} />
+      <rect x={14} y={15} width={13} height={2} fill="rgba(255,255,255,0.2)" rx={1} />
+      {/* arms */}
+      <rect x={5}  y={14} width={5} height={11} fill={shade} rx={2} />
+      <rect x={28} y={14} width={5} height={11} fill={shade} rx={2} />
+      {/* neck */}
+      <rect x={16} y={11} width={6} height={4} fill={skinColor} />
+      {/* head */}
+      <rect x={10} y={3} width={18} height={13} fill={skinColor} rx={3} />
+      {/* hat brim */}
+      <rect x={8} y={5} width={22} height={3} fill={shadeColor(hatColor,-30)} rx={1} />
+      {/* hat crown */}
+      <rect x={11} y={0} width={16} height={7} fill={hatColor} rx={2} />
+      {/* eyes */}
+      <circle cx={14} cy={9} r={2} fill="#1a1a1a" />
+      <circle cx={23} cy={9} r={2} fill="#1a1a1a" />
+      <circle cx={14.6} cy={8.4} r={0.7} fill="white" />
+      <circle cx={23.6} cy={8.4} r={0.7} fill="white" />
+    </g>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
+export default function PokemonMap() {
+  const [player, setPlayer] = useState({ x:9, y:8 });
+  const [facing, setFacing] = useState("down");
+  const [walkFrame, setWalkFrame] = useState(0);
+  const [isMoving, setIsMoving] = useState(false);
+  const [dialog, setDialog] = useState(null);
+  const [dialogIdx, setDialogIdx] = useState(0);
+  const [battle, setBattle] = useState(null);
+  const [battleLog, setBattleLog] = useState([]);
+  const [battleAnim, setBattleAnim] = useState(null);
+  const [steps, setSteps] = useState(0);
+  const [notification, setNotification] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [camPos, setCamPos] = useState({ x:2, y:1 });
+  const [targetCam, setTargetCam] = useState({ x:2, y:1 });
+
+  const keysRef = useRef(new Set());
+  const moveRef = useRef(null);
+  const notifRef = useRef(null);
+  const walkTimerRef = useRef(null);
+  const camAnimRef = useRef(null);
+
+  const vpW = 15, vpH = 11;
+
+  // Animation tick (60fps target via rAF)
+  useEffect(() => {
+    let id;
+    const loop = () => { setTick(t => t + 1); id = requestAnimationFrame(loop); };
+    id = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // Smooth camera lerp driven by tick
+  useEffect(() => {
+    setCamPos(prev => ({
+      x: prev.x + (targetCam.x - prev.x) * 0.15,
+      y: prev.y + (targetCam.y - prev.y) * 0.15,
+    }));
+  }, [tick]);
+
+  const getTargetCam = useCallback((px, py) => ({
+    x: Math.max(0, Math.min(px - Math.floor(vpW/2), COLS - vpW)),
+    y: Math.max(0, Math.min(py - Math.floor(vpH/2), ROWS - vpH)),
+  }), []);
+
+  const showNotif = (msg) => {
+    setNotification(msg);
+    clearTimeout(notifRef.current);
+    notifRef.current = setTimeout(() => setNotification(null), 2500);
+  };
+
+  const canWalk = useCallback((x, y) => {
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
+    const t = MAP[y][x];
+    if ([T.BUILDING, T.TREE, T.WATER, T.FENCE, T.POKECENTER, T.MART].includes(t)) return false;
+    if (NPCs.some(n => n.x === x && n.y === y)) return false;
+    return true;
+  }, []);
+
+  const tryMove = useCallback((dx, dy, dir) => {
+    if (dialog || battle) return;
+    setFacing(dir);
+    const nx = player.x + dx;
+    const ny = player.y + dy;
+    if (canWalk(nx, ny)) {
+      setPlayer({ x:nx, y:ny });
+      setIsMoving(true);
+      setWalkFrame(f => f + 1);
+      clearTimeout(walkTimerRef.current);
+      walkTimerRef.current = setTimeout(() => setIsMoving(false), 200);
+      setTargetCam(getTargetCam(nx, ny));
+      setSteps(s => s + 1);
+      if (MAP[ny][nx] === T.TALL_GRASS && Math.random() < 0.2) {
+        const poke = WILD_POKEMON[Math.floor(Math.random() * WILD_POKEMON.length)];
+        const level = Math.floor(Math.random() * 5) + 2;
+        setBattle({ ...poke, level, hp: level*4, maxHp: level*4, playerHp:20, playerMaxHp:20 });
+        setBattleLog([`A wild ${poke.name} (Lv.${level}) appeared!`]);
+      }
+    }
+  }, [player, dialog, battle, canWalk, getTargetCam]);
+
+  const interact = useCallback(() => {
+    if (battle) return;
+    if (dialog) {
+      if (dialogIdx + 1 < dialog.lines.length) setDialogIdx(i => i + 1);
+      else { setDialog(null); setDialogIdx(0); }
+      return;
+    }
+    const dx = facing==="left"?-1:facing==="right"?1:0;
+    const dy = facing==="up"?-1:facing==="down"?1:0;
+    const tx = player.x+dx, ty = player.y+dy;
+    const npc = NPCs.find(n => n.x===tx && n.y===ty);
+    if (npc) { setDialog({ speaker:npc.name, lines:npc.dialog }); setDialogIdx(0); return; }
+    const sign = SIGNS.find(s => s.x===tx && s.y===ty);
+    if (sign) { setDialog({ speaker:"Sign", lines:sign.text }); setDialogIdx(0); return; }
+    const tile = MAP[ty]?.[tx];
+    if (tile === T.DOOR) {
+      if (MAP[ty-1]?.[tx] === T.POKECENTER) showNotif("♥ Your Pokemon were healed!");
+      else if (MAP[ty-1]?.[tx] === T.MART) showNotif("Welcome to the Poke Mart!");
+      else showNotif("It's locked...");
+    }
+  }, [player, facing, dialog, dialogIdx, battle]);
+
+  useEffect(() => {
+    const down = (e) => {
+      keysRef.current.add(e.key);
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","w","a","s","d"," ","Enter","z","Z"].includes(e.key)) e.preventDefault();
+      if ([" ","Enter","z","Z"].includes(e.key)) interact();
+    };
+    const up = (e) => keysRef.current.delete(e.key);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, [interact]);
+
+  useEffect(() => {
+    if (dialog || battle) return;
+    moveRef.current = setInterval(() => {
+      const k = keysRef.current;
+      if      (k.has("ArrowUp")||k.has("w"))    tryMove(0,-1,"up");
+      else if (k.has("ArrowDown")||k.has("s"))  tryMove(0,1,"down");
+      else if (k.has("ArrowLeft")||k.has("a"))  tryMove(-1,0,"left");
+      else if (k.has("ArrowRight")||k.has("d")) tryMove(1,0,"right");
+    }, 130);
+    return () => clearInterval(moveRef.current);
+  }, [tryMove, dialog, battle]);
+
+  const battleAction = (action) => {
+    if (!battle) return;
+    let log = [], b = { ...battle };
+    if (action === "fight") {
+      const dmg = Math.floor(Math.random()*5)+3;
+      b.hp = Math.max(0, b.hp - dmg);
+      log.push(`You attacked! ${b.name} took ${dmg} damage.`);
+      setBattleAnim("hit-enemy");
+      setTimeout(() => setBattleAnim(null), 350);
+      if (b.hp <= 0) {
+        setBattle({...b}); setBattleLog([...log, `${b.name} fainted! You won!`]);
+        setTimeout(() => { setBattle(null); setBattleLog([]); }, 1800); return;
+      }
+      const ed = Math.floor(Math.random()*4)+1;
+      b.playerHp = Math.max(0, b.playerHp - ed);
+      log.push(`${b.name} used Tackle! You took ${ed} damage.`);
+      setBattleAnim("hit-player");
+      setTimeout(() => setBattleAnim(null), 350);
+      if (b.playerHp <= 0) {
+        setBattle({...b}); setBattleLog([...log, "You blacked out..."]);
+        setTimeout(() => { setBattle(null); setBattleLog([]); setPlayer({x:3,y:4}); }, 1800); return;
+      }
+    } else if (action === "run") {
+      if (Math.random() < 0.6) {
+        setBattleLog(["Got away safely!"]);
+        setTimeout(() => { setBattle(null); setBattleLog([]); }, 900); return;
+      }
+      log.push("Can't escape!");
+      const ed=Math.floor(Math.random()*4)+1; b.playerHp=Math.max(0,b.playerHp-ed);
+      log.push(`${b.name} attacked! You took ${ed} damage.`);
+    } else if (action === "ball") {
+      if (Math.random() < 0.3) {
+        setBattleLog([`Gotcha! ${b.name} was caught!`]);
+        setTimeout(() => { setBattle(null); setBattleLog([]); showNotif(`${b.name} added to your team!`); }, 1500); return;
+      }
+      log.push(`Oh no! ${b.name} broke free!`);
+      const ed=Math.floor(Math.random()*4)+1; b.playerHp=Math.max(0,b.playerHp-ed);
+      log.push(`${b.name} attacked! You took ${ed} damage.`);
+    }
+    setBattle(b); setBattleLog(log);
+  };
+
+  const renderTile = (mx, my) => {
+    const t = MAP[my]?.[mx] ?? T.GRASS;
+    switch(t) {
+      case T.GRASS:      return <GrassTile />;
+      case T.PATH:       return <PathTile />;
+      case T.WATER:      return <WaterTile tick={tick} />;
+      case T.TREE:       return <Tree3D tick={tick} />;
+      case T.TALL_GRASS: return <TallGrass3D tick={tick} mx={mx} my={my} />;
+      case T.FLOWER:     return <FlowerTile tick={tick} mx={mx} my={my} />;
+      case T.POKECENTER: return <Pokecenter3D />;
+      case T.MART:       return <Mart3D />;
+      case T.BUILDING:   return <Building3D />;
+      case T.DOOR:       return <DoorTile />;
+      case T.SIGN:       return <SignTile />;
+      case T.FENCE:      return <FenceTile />;
+      case T.SAND:       return <SandTile />;
+      default:           return <GrassTile />;
+    }
+  };
+
+  // sub-pixel smooth scroll
+  const subX = (camPos.x % 1) * TILE;
+  const subY = (camPos.y % 1) * TILE;
+  const baseCX = Math.floor(camPos.x);
+  const baseCY = Math.floor(camPos.y);
+
+  const facingArrow = {up:"↑",down:"↓",left:"←",right:"→"}[facing];
+
+  return (
+    <div style={{
+      fontFamily: "'Courier New', monospace",
+      background: "#080d18",
+      minHeight: "100vh",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 12,
+      userSelect: "none",
+    }}>
+      {/* Title */}
+      <div style={{
+        color: "#f7c948",
+        fontSize: 20,
+        fontWeight: "bold",
+        letterSpacing: 5,
+        marginBottom: 6,
+        textShadow: "0 0 16px #f7c948, 0 0 32px #f7c94844",
+      }}>
+        ✦ PALLETE TOWN ✦
+      </div>
+
+      {/* HUD bar */}
+      <div style={{ display:"flex", gap:20, marginBottom:6, color:"#5888c8", fontSize:12, letterSpacing:1 }}>
+        <span>STEPS <span style={{color:"#c8e8ff"}}>{steps}</span></span>
+        <span>POS <span style={{color:"#c8e8ff"}}>{player.x},{player.y}</span></span>
+        <span>DIR <span style={{color:"#c8e8ff"}}>{facingArrow}</span></span>
+      </div>
+
+      {/* Viewport */}
+      <div style={{
+        position: "relative",
+        border: "3px solid #f7c948",
+        boxShadow: "0 0 28px #f7c94855, 0 0 6px #f7c948",
+        overflow: "hidden",
+        borderRadius: 2,
+      }}>
+        <svg
+          width={vpW * TILE}
+          height={vpH * TILE}
+          style={{ display: "block" }}
+        >
+          <g transform={`translate(${-subX}, ${-subY})`}>
+            {Array.from({ length: vpH + 2 }, (_, ry) =>
+              Array.from({ length: vpW + 2 }, (_, rx) => {
+                const mx = rx + baseCX;
+                const my = ry + baseCY;
+                if (mx < 0 || my < 0 || mx >= COLS || my >= ROWS) return null;
+                const npc = NPCs.find(n => n.x === mx && n.y === my);
+                const isPlayer = player.x === mx && player.y === my;
+                return (
+                  <g key={`${mx}-${my}`} transform={`translate(${rx*TILE},${ry*TILE})`}>
+                    {renderTile(mx, my)}
+                    {npc && <NPC3D color={npc.color} hatColor={npc.hatColor} skinColor={npc.skinColor} />}
+                    {isPlayer && <Player3D facing={facing} walkFrame={isMoving ? walkFrame : 0} />}
+                  </g>
+                );
+              })
+            )}
+          </g>
+        </svg>
+
+        {/* Notification toast */}
+        {notification && (
+          <div style={{
+            position: "absolute",
+            top: 10,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(4,6,18,0.93)",
+            color: "#f7c948",
+            padding: "6px 20px",
+            border: "2px solid #f7c948",
+            borderRadius: 3,
+            fontSize: 13,
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+            boxShadow: "0 0 12px #f7c94855",
+          }}>
+            {notification}
+          </div>
+        )}
+
+        {/* Dialog box */}
+        {dialog && (
+          <div style={{
+            position: "absolute",
+            bottom: 0, left: 0, right: 0,
+            background: "rgba(4,6,20,0.97)",
+            borderTop: "3px solid #f7c948",
+            padding: "10px 18px",
+            minHeight: 76,
+            boxShadow: "0 -6px 24px rgba(0,0,0,0.7)",
+          }}>
+            <div style={{ color: "#f7c948", fontSize: 11, fontWeight: "bold", marginBottom: 5, letterSpacing: 2 }}>
+              ▶ {dialog.speaker.toUpperCase()}
+            </div>
+            <div style={{ color: "#eeeeff", fontSize: 13, lineHeight: 1.65 }}>
+              {dialog.lines[dialogIdx]}
+            </div>
+            <div style={{ color: "#445566", fontSize: 10, textAlign: "right", marginTop: 4 }}>
+              {dialogIdx < dialog.lines.length - 1 ? "▼ continue" : "✓ close"} &nbsp; (Z / Enter / A)
+            </div>
+          </div>
+        )}
+
+        {/* Battle overlay */}
+        {battle && (
+          <div style={{ position:"absolute", inset:0, background:"#090e1e", display:"flex", flexDirection:"column" }}>
+            {/* Arena */}
+            <div style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-around",
+              padding: "10px 18px",
+              position: "relative",
+              background: "repeating-linear-gradient(135deg, #0c1530 0, #0c1530 22px, #0e1a3a 22px, #0e1a3a 44px)",
+            }}>
+              {/* Enemy card */}
+              <div style={{
+                textAlign: "center",
+                transform: battleAnim === "hit-enemy" ? "translateX(10px) scale(0.95)" : "none",
+                transition: "transform 0.12s",
+              }}>
+                <div style={{ fontSize: 54, lineHeight: 1, marginBottom: 6, filter: "drop-shadow(0 2px 8px rgba(255,200,0,0.4))" }}>
+                  {battle.emoji}
+                </div>
+                <div style={{
+                  background: "rgba(0,0,0,0.65)",
+                  border: "1px solid #1e2a4a",
+                  borderRadius: 5,
+                  padding: "5px 12px",
+                  color: "#fff",
+                  fontSize: 11,
+                  minWidth: 90,
+                }}>
+                  <div style={{ color: "#f7c948", fontWeight: "bold", fontSize: 12 }}>{battle.name}</div>
+                  <div style={{ color: "#778", fontSize: 9, marginBottom: 4 }}>Lv.{battle.level}</div>
+                  <div style={{ background: "#1a1a2a", height: 7, borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{
+                      width: `${(battle.hp/battle.maxHp)*100}%`,
+                      height: "100%",
+                      background: battle.hp > battle.maxHp*0.5 ? "#30cc30" : battle.hp > battle.maxHp*0.2 ? "#ffaa00" : "#ff3333",
+                      transition: "width 0.35s ease",
+                      borderRadius: 4,
+                    }}/>
+                  </div>
+                  <div style={{ color: "#667", fontSize: 9, marginTop: 3 }}>{battle.hp}/{battle.maxHp} HP</div>
+                </div>
+              </div>
+
+              <div style={{ color: "#f7c948", fontSize: 22, fontWeight: "bold", textShadow: "0 0 12px #f7c948", flexShrink: 0 }}>VS</div>
+
+              {/* Player card */}
+              <div style={{
+                textAlign: "center",
+                transform: battleAnim === "hit-player" ? "translateX(-10px) scale(0.95)" : "none",
+                transition: "transform 0.12s",
+              }}>
+                <svg width={40} height={40} viewBox="0 0 40 40" style={{ marginBottom: 6, overflow: "visible" }}>
+                  <Player3D facing="down" walkFrame={Math.floor(tick/10)%4} />
+                </svg>
+                <div style={{
+                  background: "rgba(0,0,0,0.65)",
+                  border: "1px solid #1e2a4a",
+                  borderRadius: 5,
+                  padding: "5px 12px",
+                  color: "#fff",
+                  fontSize: 11,
+                  minWidth: 90,
+                }}>
+                  <div style={{ color: "#88aaff", fontWeight: "bold", fontSize: 12 }}>Your Pokemon</div>
+                  <div style={{ color: "#778", fontSize: 9, marginBottom: 4 }}>Lv.5</div>
+                  <div style={{ background: "#1a1a2a", height: 7, borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{
+                      width: `${(battle.playerHp/battle.playerMaxHp)*100}%`,
+                      height: "100%",
+                      background: "#30cc30",
+                      transition: "width 0.35s ease",
+                      borderRadius: 4,
+                    }}/>
+                  </div>
+                  <div style={{ color: "#667", fontSize: 9, marginTop: 3 }}>{battle.playerHp}/{battle.playerMaxHp} HP</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Battle log */}
+            <div style={{
+              background: "rgba(4,7,18,0.96)",
+              borderTop: "2px solid #1a2240",
+              padding: "7px 14px",
+              minHeight: 46,
+              fontSize: 11,
+              lineHeight: 1.75,
+            }}>
+              {battleLog.map((l, i) => (
+                <div key={i} style={{ color: i === battleLog.length-1 ? "#dde" : "#556" }}>
+                  {i === battleLog.length-1 ? "▷ " : "  "}{l}
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 4,
+              padding: "8px 8px",
+              background: "#060a16",
+              borderTop: "2px solid #f7c948",
+            }}>
+              {[["fight","⚔️","FIGHT"],["ball","🔴","BALL"],["run","🏃","RUN"]].map(([a,ic,lb]) => (
+                <button key={a} onClick={() => battleAction(a)} style={{
+                  background: "#0e1530",
+                  border: "2px solid #1e2a50",
+                  color: "#f7c948",
+                  padding: "8px 4px",
+                  borderRadius: 5,
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontFamily: "inherit",
+                  fontWeight: "bold",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 3,
+                  transition: "all 0.12s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "#1a2860"; e.currentTarget.style.borderColor = "#f7c948"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "#0e1530"; e.currentTarget.style.borderColor = "#1e2a50"; }}
+                >
+                  <span style={{ fontSize: 18 }}>{ic}</span>
+                  <span>{lb}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Controls */}
+      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 18 }}>
+        {/* D-Pad */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,40px)", gridTemplateRows: "repeat(3,40px)", gap: 3 }}>
+          {[
+            [null, {l:"▲",dx:0,dy:-1,d:"up"}, null],
+            [{l:"◀",dx:-1,dy:0,d:"left"}, null, {l:"▶",dx:1,dy:0,d:"right"}],
+            [null, {l:"▼",dx:0,dy:1,d:"down"}, null],
+          ].map((row, ri) => row.map((btn, ci) => (
+            <div key={`${ri}-${ci}`} style={{ width:40, height:40 }}>
+              {btn && (
+                <button
+                  onPointerDown={() => tryMove(btn.dx, btn.dy, btn.d)}
+                  style={{
+                    width: "100%", height: "100%",
+                    background: "linear-gradient(180deg,#22284a,#161c38)",
+                    border: "2px solid #f7c948",
+                    color: "#f7c948",
+                    fontSize: 14,
+                    borderRadius: 5,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    touchAction: "none",
+                    boxShadow: "0 3px 0 #806000",
+                    transition: "transform 0.08s, box-shadow 0.08s",
+                  }}
+                  onMouseDown={e => { e.currentTarget.style.transform="translateY(3px)"; e.currentTarget.style.boxShadow="none"; }}
+                  onMouseUp={e => { e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow="0 3px 0 #806000"; }}
+                >
+                  {btn.l}
+                </button>
+              )}
+            </div>
+          )))}
+        </div>
+
+        {/* A Button */}
+        <button
+          onClick={interact}
+          style={{
+            width: 58, height: 58,
+            borderRadius: "50%",
+            background: "radial-gradient(circle at 35% 35%, #f05050, #901818)",
+            border: "3px solid #f7c948",
+            color: "#fff",
+            cursor: "pointer",
+            fontSize: 13,
+            fontFamily: "inherit",
+            fontWeight: "bold",
+            boxShadow: "0 4px 0 #700000, 0 0 14px #ff444455",
+            transition: "transform 0.08s, box-shadow 0.08s",
+          }}
+          onMouseDown={e => { e.currentTarget.style.transform="translateY(4px)"; e.currentTarget.style.boxShadow="0 0 0 #700000"; }}
+          onMouseUp={e => { e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow="0 4px 0 #700000, 0 0 14px #ff444455"; }}
+        >
+          A
+        </button>
+      </div>
+
+      <div style={{ color:"#2a3a4a", fontSize:11, marginTop:8, textAlign:"center", letterSpacing:1 }}>
+        WASD / ARROWS TO MOVE &nbsp;·&nbsp; Z / ENTER / A TO INTERACT &nbsp;·&nbsp; TALL GRASS = WILD BATTLES
+      </div>
+    </div>
+  );
+}
